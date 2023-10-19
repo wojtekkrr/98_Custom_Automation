@@ -1,9 +1,6 @@
 from tkinter import *
 from datetime import datetime, timedelta
-import math
 import csv
-import time
-from random import randint
 
 # ---------------------------- CONSTANTS ------------------------------- #
 WHITE = "#f8f8f8"
@@ -23,18 +20,8 @@ timer_r = None
 clock_running = False
 
 
-# ----------------------------- RUN ONCE DECORATOR ------------------------------- #
-def run_once(func):
-    def wrapper(*args, **kwargs):
-        if not wrapper.has_run:
-            if clock_running is False:
-                wrapper.has_run = True
-            return func(*args, **kwargs)
-    wrapper.has_run = False
-    return wrapper
-
-
 # ---------------------------------- SAVE DAY ------------------------------------ #
+# Zapisuje pierwszy obiekt datetime do pliku CSV, nadpisując go
 def save_day():
     now = datetime.now()
     with open("time.csv", mode='w', newline='') as file:
@@ -42,7 +29,8 @@ def save_day():
         writer.writerow([now])
 
 
-# ---------------------------------- SAVE DAY ------------------------------------ #
+# ---------------------------------- SAVE TIME ----------------------------------- #
+# Dopisuje obiekt datetime do pliku CSV
 def save_time():
     now = datetime.now()
     with open("time.csv", mode='a', newline='') as file:
@@ -51,10 +39,13 @@ def save_time():
 
 
 # ----------------------------- COUNTING MECHANISM ------------------------------- #
-@run_once
+# Odlicza czas na podstawie liczby sekund
 def counting(seconds_overall):
+    global timer_r
+    global status
+
+    # Mechanizm wyłączający w przypadku zatrzymania zegara
     if clock_running:
-        global timer_r
         godziny = seconds_overall // 60 // 60 % 60
         if godziny < 10:
             godziny = f"0{godziny}"
@@ -65,9 +56,11 @@ def counting(seconds_overall):
         if sekundy < 10:
             sekundy = f"0{sekundy}"
 
+        # Wyświetlenie na widgecie
         canvas.itemconfig(timer_text, text=f"{godziny}:{minuty}")
         canvas.itemconfig(seconds_text, text=sekundy)
 
+        # Mechanizm z miganiem tekstu na widgecie
         if seconds_overall % 4 == 0 or seconds_overall % 4 == 1 or seconds_overall % 4 == 2:
             canvas.itemconfig(status_text, text=status)
 
@@ -80,23 +73,28 @@ def counting(seconds_overall):
         if seconds_overall % 4 == 1:
             canvas.itemconfig(mode_text, text="")
 
+        # Rekurencja
         timer_r = window.after(1000, counting, seconds_overall + 1)
 
 
 # --------------------------------- START/STOP ----------------------------------- #
+# Funkcja zatrzymująca odliczanie czasu
 def start_stop():
     global status
     global clock_running
 
+    # Dopisanie obiektu datetime do pliku CSV
     save_time()
 
-    status = "work"
-
+    # Wyłączenie funkcji z zegarem
     clock_running = False
+
+    # Inicjalizacja funkcji bazowej
     initiation()
 
 
 # ----------------------------------- MODE -------------------------------------- #
+# Funkcja zmieniająca tryb zegara
 def change_mode():
     global mode
     global clock_running
@@ -107,7 +105,10 @@ def change_mode():
     elif mode == "day":
         mode = "now"
 
+    # Wyłączenie funkcji z zegarem
     clock_running = False
+
+    # Inicjalizacja funkcji bazowej
     initiation()
 
 
@@ -116,6 +117,7 @@ def initiation():
     global status
     global clock_running
 
+    # Odczyt danych z pliku CSV
     with open("time.csv", mode='r') as file:
         reader = csv.reader(file)
         data = []
@@ -123,8 +125,16 @@ def initiation():
             data.append(row[0])
 
     now = datetime.now()
+    # Jeżeli nie ma żadnych zapisanych dat albo nastał nowy dzień niż zapisany to uruchom fn save_day
     if not data or data[0][:10] != now.strftime("%Y-%m-%d"):
         save_day()
+
+    # Ponowne odczytanie danych (sytuacja w których nic nie było zapisane w CSV, ale w poprzednim kroku te dane dodano)
+    with open("time.csv", mode='r') as file:
+        reader = csv.reader(file)
+        data = []
+        for row in reader:
+            data.append(row[0])
 
     # Wczytana data jako string
     data_string_last = data[-1]
@@ -133,27 +143,41 @@ def initiation():
     # Utwórz obiekt datetime z podanej daty
     parsed_date_last = datetime.strptime(data_string_last, date_format)
 
+    # W trybie now
     if mode == "now":
+
+        # Jeżeli brakuje daty opisującej moment zakończenia
         if len(data) % 2 != 0:
-            #Czas który upłynął
+            # Czas który upłynął
             current_work_time = now - parsed_date_last
+
         else:
+            # Zmiana widgetu
             status = "break"
             data_string_second_last = data[-2]
             parsed_date_second_last = datetime.strptime(data_string_second_last, date_format)
+            # Obliczenie różnicy czasu między uruchomieniem, a zastopowaniem zegara
             current_work_time = parsed_date_last - parsed_date_second_last
+
+    # W trybie day
     else:
         start_moment = []
         end_moment = []
         for i in range(len(data)):
+            # Przepisanie obiektów datetime do listy zawierającej chwilę z początkiem nauki, oraz do takiej
+            # zawierającej koniec nauki
             if i % 2 == 0:
                 start_moment.append(datetime.strptime(data[i], date_format))
             else:
                 end_moment.append(datetime.strptime(data[i], date_format))
 
+        # Jeżeli nie zapisano końca obecnej nauki, to dopisz chwilę obecną do listy z datami opisującymi koniec nauki
         if len(data) % 2 != 0:
             end_moment.append(now)
+            # Zmiana widgetu
+            status = "break"
 
+        # Obliczenie całkowitego czasu nauki
         current_work_time = timedelta()
         for i in range(len(start_moment)):
             current_work_time += end_moment[i] - start_moment[i]
@@ -161,13 +185,14 @@ def initiation():
     godziny = int(current_work_time.total_seconds() // 60 // 60 % 60)
     if godziny < 10:
         godziny = f"0{godziny}"
-    minuty = int(current_work_time.total_seconds() //60 % 60)
+    minuty = int(current_work_time.total_seconds() // 60 % 60)
     if minuty < 10:
         minuty = f"0{minuty}"
     sekundy = int(current_work_time.total_seconds() % 60)
     if sekundy < 10:
         sekundy = f"0{sekundy}"
 
+    # Dostosowanie widgetów
     canvas.itemconfig(timer_text, text=f"{godziny}:{minuty}")
     canvas.itemconfig(seconds_text, text=sekundy)
     seconds_overall = int(current_work_time.total_seconds())
@@ -175,28 +200,14 @@ def initiation():
     canvas.itemconfig(status_text, text=status)
     canvas.itemconfig(mode_text, text=mode)
 
+    # Uruchomienie odliczania czasu, jeżeli zegar nie został zatrzymany
     if len(data) % 2 != 0:
+        status = "work"
         clock_running = True
         counting(seconds_overall)
 
 
-
-
-            # moment_startu = datetime.now()
-
-            # with open("time.csv", mode='w', newline='') as file:
-            #     writer = csv.writer(file)
-            #     # writer.writerow(["Aktualna Godzina"])
-            #     writer.writerow([moment_startu])
-
-
-
-
-
-
-
 # ---------------------------- UI SETUP ------------------------------- #
-
 window = Tk()
 window.title("Study time")
 window.config(padx=100, pady=50, bg=WHITE)
@@ -228,8 +239,7 @@ button_1_window = canvas.create_window(120, 452, anchor=CENTER, window=button_1)
 button_2 = Button(canvas, image=start_button, highlightthickness=0, command=change_mode)
 button_2_window = canvas.create_window(265, 452, anchor=CENTER, window=button_2)
 
+# Uruchomienie funkcji bazowej
 initiation()
-
-
 
 window.mainloop()
